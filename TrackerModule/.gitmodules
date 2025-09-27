@@ -1,0 +1,3 @@
+[submodule "module/pico_lte_micropython-sdk"]
+	path = module/pico_lte_micropython-sdk
+	url = https://github.com/XZCendence/pico_lte_micropython-sdk
