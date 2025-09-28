@@ -270,6 +270,8 @@ export default function App() {
           </CardContent>
         </Card>
 
+        <div className="w-full h-0 invisible" />
+
         <Card className="p-4 flex-1 min-w-[280px] bg-gray-700">
           <h2 className="text-lg font-semibold mb-4">Focus History</h2>
           <CardContent>
@@ -306,18 +308,20 @@ export default function App() {
           </CardContent>
         </Card>
 
-        <Card className="p-4 flex-1 max-h-[440px] max-w-[360px] bg-gray-700">
-          <h2 className="text-lg font-semibold mb-4">Latest Image</h2>
-          <CardContent className="flex justify-center items-center h-[300px]">
-            {dashboardData?.last_image_url && (
-              <img
-                src={`${dashboardData.last_image_url}?t=${dashboardData.timestamp}`}
-                alt="Latest"
-                className="rounded max-h-[260px]"
-              />
-            )}
-          </CardContent>
-        </Card>
+        {dashboardData?.last_image_url && (
+          <Card className="p-4 flex-1 max-h-[440px] max-w-[360px] bg-gray-700">
+            <h2 className="text-lg font-semibold mb-4">Latest Image</h2>
+            <CardContent className="flex justify-center items-center h-[300px]">
+              {dashboardData?.last_image_url && (
+                <img
+                  src={`${dashboardData.last_image_url}?t=${dashboardData.timestamp}`}
+                  alt="Latest"
+                  className="rounded max-h-[260px]"
+                />
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
