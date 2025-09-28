@@ -1,6 +1,6 @@
 SAVE_IMAGE_PATH = "aaa.jpg"
-DEST_IMAGE_PATH = "./image.jpg"
 SRC_IMAGE_PATH = "/fpga/aaa.jpg"
+DEST_IMAGE_PATH = "./image.jpg"
 
 import sys
 import pathlib
@@ -71,10 +71,6 @@ def transfer_picture(fw: FreeWili, processor: FwProcessor, source_file: str, des
     print(f"Downloading {source_file} from {processor.name} processor...")
 
     try:
-        # ensure destination directory exists
-        dest_path = pathlib.Path(destination_path)
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-
         result = fw.get_file(
             source_file=source_file,
             destination_path=dest_path,
@@ -110,7 +106,7 @@ def main():
 
     time.sleep(10) # very precise timing
 
-    # ensure directory
+    # ensure destination directory exists
     dest = pathlib.Path(args.dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     transfer_picture(fw, FwProcessor.Main, SRC_IMAGE_PATH, str(dest))
