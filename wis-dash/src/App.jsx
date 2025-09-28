@@ -1,18 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import * as Ariakit from "@ariakit/react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  PieChart,
-  Pie,
-  Cell,
-  Sector,
-  ResponsiveContainer
-} from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, Sector, ResponsiveContainer } from "recharts";
 
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -88,6 +76,8 @@ export default function App() {
   const [focusHistory, setFocusHistory] = useState([]);
   const [sessionList, setSessionList] = useState([]);
   const [selectedSession, setSelectedSession] = useState("current");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/sessionlist")
@@ -97,29 +87,56 @@ export default function App() {
       });
   }, []);
   
-  useEffect(() => {
-    const fetchData = () => {
-      const url =
-        selectedSession === "current"
-          ? "/api/dash/monolithic"
-          : `/api/dash/session?datetime=${encodeURIComponent(selectedSession)}`;
-
-      fetch(url)
-        .then(res => res.json())
-        .then(data => {
-          setDashboardData(data);
-          setFocusHistory(data.focus_history || []);
-        });
-    };
-
-    fetchData(); // Fetch immediately
-    const interval = setInterval(fetchData, 5000); // Then poll every 5s
-
-    return () => clearInterval(interval); // Clean up on unmount or session change
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const url = selectedSession === "current"
+        ? "/api/dash/monolithic"
+        : `/api/dash/session?datetime=${encodeURIComponent(selectedSession)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+      const data = await res.json();
+      setDashboardData(data);
+      setFocusHistory(data.focus_history || []);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
   }, [selectedSession]);
 
-  const startSession = () => fetch("/api/session/start", { method: "POST" });
-  const stopSession = () => fetch("/api/session/stop", { method: "POST" });
+  useEffect(() => {
+    loadData();
+    const interval = setInterval(loadData, 5000);
+    return () => clearInterval(interval);
+  }, [loadData]);
+
+  const toggleSession = async () => {
+    const isActive = dashboardData?.session_active;
+    const endpoint = isActive ? "/api/session/stop" : "/api/session/start";
+    await fetch(endpoint, { method: "POST" });
+    await loadData();
+  };
+
+  const refreshData = () => loadData();
+  const exportData = () => {
+    const payload = {
+      session: selectedSession,
+      dashboard: dashboardData,
+      focus_history: focusHistory,
+      exported_at: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `wili-study-${selectedSession === "current" ? "current" : new Date(selectedSession).toISOString()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const focusHistoryData = dashboardData?.focus_history ?? [];
 
@@ -150,29 +167,32 @@ export default function App() {
     { name: "Unfocused", value: unfocusedPercent },
   ];
 
-  const lineData = focusHistoryData.map(entry => ({
+  const lineData = useMemo(() => focusHistoryData.map(entry => ({
     timestamp: entry.timestamp,
     value: entry.decibels ?? 0,
-  }));
+  })), [focusHistoryData]);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
-      <h1 className="text-2xl font-bold mb-2">Will I Study Dashboard</h1>
+    <div className="min-h-screen bg-gray-900/90 text-neutral-100 p-4 md:p-6">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl md:text-2xl font-semibold tracking-tight">wili-study</h1>
+        <div className="text-xs md:text-sm text-neutral-400">{dashboardData?.timestamp && new Date(dashboardData.timestamp).toLocaleString()}</div>
+      </div>
 
-      <div className="mb-4">
-        <label className="text-sm text-gray-600 mr-2">Viewing Session:</label>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <label className="text-sm text-neutral-400">Viewing Session</label>
         <select
-          className="border px-2 py-1 rounded"
+          className="bg-neutral-900 border border-neutral-800 px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-neutral-700"
           value={selectedSession}
           onChange={e => setSelectedSession(e.target.value)}
         >
           <option value="current">Current Session</option>
           {sessionList.map((time, idx) => (
-            <option key={idx} value={time}>
-              {new Date(time).toLocaleString()}
-            </option>
+            <option key={idx} value={time}>{new Date(time).toLocaleString()}</option>
           ))}
         </select>
+        {loading && <span className="text-xs text-neutral-500">Loading…</span>}
+        {error && <span className="text-xs text-red-400">{error}</span>}
       </div>
 
       {/* Focus Summary as plain gray text */}
@@ -181,30 +201,35 @@ export default function App() {
         <p className="mt-1 text-xs">Last Updated: {(dashboardData?.end || dashboardData?.timestamp) && new Date(dashboardData.end || dashboardData.timestamp).toLocaleString()}</p>
       </div>
 
-      {/* Expanded Options as visible buttons */}
-      <div className="flex gap-3 mb-6">
-        <Button onClick={() => refreshData()}>Refresh Data</Button>
-        <Button onClick={() => exportData()}>Export</Button>
-        <Button onClick={() => startSession()}>Start Session</Button>
-        <Button onClick={() => stopSession()}>Stop Session</Button>
+      {/* Controls */}
+      <div className="flex flex-wrap gap-2 md:gap-3 mb-4 md:mb-6">
+        <Button variant="outline" onClick={() => refreshData()}>Refresh Data</Button>
+        <Button variant="outline" onClick={() => exportData()}>Export</Button>
+        <Button 
+          variant={dashboardData?.session_active ? "destructive" : "default"} 
+          onClick={() => toggleSession()}
+        >
+          {dashboardData?.session_active ? "Stop Session" : "Start Session"}
+        </Button>
       </div>
 
-      {/* Flex container */}
-      <div className="flex flex-wrap gap-6 mt-6 bg-gray-800 p-4 rounded-lg text-gray-400">
+      {/* Content grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6 mt-4">
         {/* Line Chart Card */}
-        <Card className="p-4 flex-1 min-w-[280px] bg-gray-700">
+        <Card className="p-4">
           <h2 className="text-lg font-semibold mb-4">Decibel Level</h2>
-          <CardContent>
-            <LineChart width={400} height={250} data={lineData}>
+          <CardContent className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={lineData}>
               <XAxis
                 dataKey="timestamp"
-                stroke="#fff"
+                stroke="#888"
                 tick={{ fontSize: 12 }}
                 tickFormatter={(value) =>
                   new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
                 }
               />
-              <YAxis stroke="#fff" domain={['auto', 'auto']} />
+              <YAxis stroke="#888" domain={['auto', 'auto']} />
               <Tooltip
                 labelFormatter={(label) =>
                   new Date(label).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -213,25 +238,27 @@ export default function App() {
               <Line
                 type="monotone"
                 dataKey="value"
-                stroke="#4f46e5"
+                stroke="#60a5fa"
                 strokeWidth={2}
                 dot={{ r: 3 }}
                 activeDot={{ r: 5 }}
               />
             </LineChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
 
         {/* Pie Chart Card */}
-        <Card className="p-4 flex-1 max-h-[440px] max-w-[360px] bg-gray-700">
+        <Card className="p-4">
           <h2 className="text-lg font-semibold mb-4">Time Spent (Minutes)</h2>
-          <CardContent className="flex justify-center items-center h-[300px]">
-            <PieChart width={300} height={300}>
+          <CardContent className="flex justify-center items-center h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
               <Pie
                 data={pieData}
                 cx="50%"
                 cy="50%"
-                outerRadius={80}
+                outerRadius={90}
                 dataKey="value"
                 label
               >
@@ -244,14 +271,16 @@ export default function App() {
               </Pie>
               <Tooltip />
             </PieChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
 
         {/* Radial Bar Chart Card */}
-        <Card className="p-4 flex-1 max-h-[440px] max-w-[360px] bg-gray-700">
+        <Card className="p-4">
           <h2 className="text-lg font-semibold mb-4">Percentage Focused</h2>
-          <CardContent className="flex justify-center items-center h-[300px]">
-            <PieChart width={300} height={300}>
+          <CardContent className="flex justify-center items-center h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
               <Pie
                 activeShape={renderActiveShape}
                 data={data}
@@ -267,19 +296,20 @@ export default function App() {
                 ))}
               </Pie>
             </PieChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        <div className="w-full h-0 invisible" />
-
-        <Card className="p-4 flex-1 min-w-[280px] bg-gray-700">
+        {/* Focus History */}
+        <Card className="p-4 md:col-span-2 xl:col-span-1">
           <h2 className="text-lg font-semibold mb-4">Focus History</h2>
-          <CardContent>
-            <LineChart width={400} height={250} data={focusHistory}>
+          <CardContent className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={focusHistory}>
               {/* Format timestamp to HH:mm:ss */}
               <XAxis
                 dataKey="timestamp"
-                stroke="#fff"
+                stroke="#888"
                 tick={{ fontSize: 12 }}
                 tickFormatter={(value) =>
                   new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -288,7 +318,7 @@ export default function App() {
               {/* Fix Y-axis range from 0 to 1 */}
               <YAxis
                 domain={[0, 1]}
-                stroke="#fff"
+                stroke="#888"
                 tick={{ fontSize: 12 }}
               />
               <Tooltip
@@ -299,29 +329,29 @@ export default function App() {
               <Line
                 type="monotone"
                 dataKey="focus_level"
-                stroke="#22d3ee"
+                stroke="#34d399"
                 strokeWidth={2}
                 dot={{ r: 3 }}
                 activeDot={{ r: 5 }}
               />
             </LineChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {dashboardData?.last_image_url && (
-          <Card className="p-4 flex-1 max-h-[440px] max-w-[360px] bg-gray-700">
-            <h2 className="text-lg font-semibold mb-4">Latest Image</h2>
-            <CardContent className="flex justify-center items-center h-[300px]">
-              {dashboardData?.last_image_url && (
-                <img
-                  src={`${dashboardData.last_image_url}?t=${dashboardData.timestamp}`}
-                  alt="Latest"
-                  className="rounded max-h-[260px]"
-                />
-              )}
-            </CardContent>
-          </Card>
-        )}
+        {/* Latest Image */}
+        <Card className="p-4">
+          <h2 className="text-lg font-semibold mb-4">Latest Image</h2>
+          <CardContent className="flex justify-center items-center h-[300px]">
+            {dashboardData?.last_image_url && (
+              <img
+                src={`${dashboardData.last_image_url}?t=${dashboardData.timestamp}`}
+                alt="Latest"
+                className="rounded max-h-[260px] object-contain"
+              />
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
