@@ -51,6 +51,27 @@ type StudyStats struct {
 	FocusHistory    []FocusPoint `json:"focus_history"`
 }
 
+// PersistedState represents the on-disk snapshot of the in-memory state
+type PersistedState struct {
+	SessionActive bool
+	SessionStart  time.Time
+	LastImageFile string
+	LastAnalysis  Analysis
+	SamplesCount  int
+	FocusHistory  []FocusPoint
+    CurrentSessionID string
+}
+
+// Session represents a completed study session
+type Session struct {
+    ID            string
+    Start         time.Time
+    End           time.Time
+    SamplesCount  int
+    FocusHistory  []FocusPoint
+    LastAnalysis  Analysis
+}
+
 // ----- Global state (simple in-memory for hackathon) -----
 
 var (
@@ -121,17 +142,6 @@ func sessionsDir() string {
 
 func statePath() string { return filepath.Join(sessionsDir(), stateFileName) }
 
-// PersistedState represents the on-disk snapshot of the in-memory state
-type PersistedState struct {
-	SessionActive bool
-	SessionStart  time.Time
-	LastImageFile string
-	LastAnalysis  Analysis
-	SamplesCount  int
-	FocusHistory  []FocusPoint
-    CurrentSessionID string
-}
-
 func saveState() error {
 	st := PersistedState{}
 	mu.Lock()
@@ -174,16 +184,6 @@ func loadState() error {
 	return nil
 }
 
-// Session represents a completed study session
-type Session struct {
-    ID            string
-    Start         time.Time
-    End           time.Time
-    SamplesCount  int
-    FocusHistory  []FocusPoint
-    LastAnalysis  Analysis
-}
-
 func saveCompletedSession(s Session) error {
     if err := os.MkdirAll(sessionsDir(), 0o755); err != nil { return err }
     fname := filepath.Join(sessionsDir(), fmt.Sprintf("session-%s.gob", s.ID))
@@ -220,6 +220,14 @@ func loadAllSessions() error {
     sessions = loaded
     mu.Unlock()
     return nil
+}
+
+func listSessionStartTimes() []time.Time {
+	startTimes := make([]time.Time, 0, len(sessions))
+	for _, s := range sessions {
+		startTimes = append(startTimes, s.Start)
+	}
+	return startTimes
 }
 
 func runCaptureOnce() (string, string, error) {
@@ -496,6 +504,21 @@ func analyzeImage(path string) (Analysis, error) {
 		}
 	}
 	return a, nil
+}
+
+func prevSnapshot(datetime string) Session {
+	t, err := time.Parse(time.RFC3339, datetime)
+	if err != nil {
+		return Session{}
+	}
+
+	for _, s := range sessions {
+		if s.Start.Equal(t) {
+			return s
+		}
+	}
+
+	return Session{}
 }
 
 func snapshot() StudyStats {

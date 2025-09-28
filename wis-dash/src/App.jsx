@@ -86,10 +86,25 @@ const renderActiveShape = ({
 export default function App() {
   const [dashboardData, setDashboardData] = useState(null);
   const [focusHistory, setFocusHistory] = useState([]);
+  const [sessionList, setSessionList] = useState([]);
+  const [selectedSession, setSelectedSession] = useState("current");
+
+  useEffect(() => {
+    fetch("/api/sessionlist")
+      .then(res => res.json())
+      .then(data => {
+        setSessionList(data);
+      });
+  }, []);
   
   useEffect(() => {
     const fetchData = () => {
-      fetch("/api/dash/monolithic")
+      const url =
+        selectedSession === "current"
+          ? "/api/dash/monolithic"
+          : `/api/dash/session?datetime=${encodeURIComponent(selectedSession)}`;
+
+      fetch(url)
         .then(res => res.json())
         .then(data => {
           setDashboardData(data);
@@ -97,11 +112,11 @@ export default function App() {
         });
     };
 
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
+    fetchData(); // Fetch immediately
+    const interval = setInterval(fetchData, 5000); // Then poll every 5s
 
-    return () => clearInterval(interval);
-  }, []);
+    return () => clearInterval(interval); // Clean up on unmount or session change
+  }, [selectedSession]);
 
   const startSession = () => fetch("/api/session/start", { method: "POST" });
   const stopSession = () => fetch("/api/session/stop", { method: "POST" });
@@ -144,9 +159,25 @@ export default function App() {
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
       <h1 className="text-2xl font-bold mb-2">Will I Study Dashboard</h1>
 
+      <div className="mb-4">
+        <label className="text-sm text-gray-600 mr-2">Viewing Session:</label>
+        <select
+          className="border px-2 py-1 rounded"
+          value={selectedSession}
+          onChange={e => setSelectedSession(e.target.value)}
+        >
+          <option value="current">Current Session</option>
+          {sessionList.map((time, idx) => (
+            <option key={idx} value={time}>
+              {new Date(time).toLocaleString()}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Focus Summary as plain gray text */}
       <div className="text-gray-400 text-sm mb-6">
-        <p>{dashboardData?.text_summary}</p>
+        <p>{dashboardData?.last_analysis?.text_summary}</p>
         <p className="mt-1 text-xs">Last Updated: {dashboardData?.timestamp}</p>
       </div>
 

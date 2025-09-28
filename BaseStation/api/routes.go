@@ -39,6 +39,16 @@ func RegisterRoutes(e *echo.Echo) {
 		return c.JSON(http.StatusOK, snapshot())
 	})
 
+	// Old Session Dashboard data
+	e.GET("/api/dash/session", func(c echo.Context) error {
+		datetime := c.QueryParam("datetime")
+		return c.JSON(http.StatusOK, prevSnapshot(datetime))
+	})
+
+	e.GET("/api/sessionlist", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, listSessionStartTimes())
+	})
+
 	// Session controls
 	e.POST("/api/session/start", func(c echo.Context) error {
 		mu.Lock()
