@@ -432,12 +432,12 @@ func analyzeImage(path string) (Analysis, error) {
 	// Prompt instructing strict JSON schema
 	prompt := strings.Join([]string{
 		"You are an assistant that evaluates study focus from a webcam-like image. Your POV is from the side of the person's desk/workspace. If they are looking straight ahead or down a little bit, they are likely focused.",
-		"If they have a phone in front of them, they are likely not focused.",
+		"If they have a phone in front of them, they are likely not focused, Ipad or tablet however may be part of homework.",
 		"Return ONLY strict JSON matching this schema with sensible values:",
 		"{\"is_focused\": boolean, \"focus_level\": number, \"is_away\": boolean, \"text_summary\": string}",
 		"- is_focused: true if person appears engaged with screen/books.",
-		"- focus_level: 0.0..1.0 confidence of focus.",
-		"- is_away: true if no person or clearly not at desk.",
+		"- focus_level: 0.0..1.0 confidence of focus, make sure to use the full range of focus values.",
+		"- is_away: true if no person or clearly not at desk, ignore far away persons in the background.",
 		"- text_summary: one short sentence.",
 	}, "\n")
 
