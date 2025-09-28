@@ -178,7 +178,7 @@ export default function App() {
       {/* Focus Summary as plain gray text */}
       <div className="text-gray-400 text-sm mb-6">
         <p>{dashboardData?.last_analysis?.text_summary}</p>
-        <p className="mt-1 text-xs">Last Updated: {dashboardData?.timestamp}</p>
+        <p className="mt-1 text-xs">Last Updated: {(dashboardData?.end || dashboardData?.timestamp) && new Date(dashboardData.end || dashboardData.timestamp).toLocaleString()}</p>
       </div>
 
       {/* Expanded Options as visible buttons */}
