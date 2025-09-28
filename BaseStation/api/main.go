@@ -59,6 +59,8 @@ var (
 	focusHistory   []FocusPoint
 	tickerStopChan chan struct{}
 	repoRoot       string
+    currentSessionID string
+    sessions         []Session
 )
 
 // ----- Path constants (relative to repo root) -----
@@ -115,6 +117,7 @@ type PersistedState struct {
 	LastAnalysis  Analysis
 	SamplesCount  int
 	FocusHistory  []FocusPoint
+    CurrentSessionID string
 }
 
 func saveState() error {
@@ -126,6 +129,7 @@ func saveState() error {
 	st.LastAnalysis = lastAnalysis
 	st.SamplesCount = samplesCount
 	st.FocusHistory = append([]FocusPoint(nil), focusHistory...)
+    st.CurrentSessionID = currentSessionID
 	mu.Unlock()
 
 	if err := os.MkdirAll(sessionsDir(), 0o755); err != nil { return err }
@@ -153,8 +157,57 @@ func loadState() error {
 	lastAnalysis = st.LastAnalysis
 	samplesCount = st.SamplesCount
 	focusHistory = append([]FocusPoint(nil), st.FocusHistory...)
+    currentSessionID = st.CurrentSessionID
 	mu.Unlock()
 	return nil
+}
+
+// Session represents a completed study session
+type Session struct {
+    ID            string
+    Start         time.Time
+    End           time.Time
+    SamplesCount  int
+    FocusHistory  []FocusPoint
+    LastAnalysis  Analysis
+}
+
+func saveCompletedSession(s Session) error {
+    if err := os.MkdirAll(sessionsDir(), 0o755); err != nil { return err }
+    fname := filepath.Join(sessionsDir(), fmt.Sprintf("session-%s.gob", s.ID))
+    f, err := os.Create(fname)
+    if err != nil { return err }
+    defer f.Close()
+    enc := gob.NewEncoder(f)
+    return enc.Encode(&s)
+}
+
+func loadAllSessions() error {
+    dir := sessionsDir()
+    entries, err := os.ReadDir(dir)
+    if err != nil {
+        if os.IsNotExist(err) { return nil }
+        return err
+    }
+    var loaded []Session
+    for _, ent := range entries {
+        name := ent.Name()
+        if name == stateFileName || !strings.HasSuffix(name, ".gob") || !strings.HasPrefix(name, "session-") {
+            continue
+        }
+        f, err := os.Open(filepath.Join(dir, name))
+        if err != nil { continue }
+        var s Session
+        dec := gob.NewDecoder(f)
+        if err := dec.Decode(&s); err == nil {
+            loaded = append(loaded, s)
+        }
+        f.Close()
+    }
+    mu.Lock()
+    sessions = loaded
+    mu.Unlock()
+    return nil
 }
 
 func runCaptureOnce() (string, error) {
@@ -429,9 +482,12 @@ func main() {
         e.Logger.Fatal(err)
     }
 
-    // Load previous state if available
+    // Load previous state and sessions if available
     if err := loadState(); err != nil {
         e.Logger.Warnf("loadState failed: %v", err)
+    }
+    if err := loadAllSessions(); err != nil {
+        e.Logger.Warnf("loadAllSessions failed: %v", err)
     }
     // If session was active, resume scheduler
     if sessionActive {
