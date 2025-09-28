@@ -48,12 +48,6 @@ def take_picture(fw: FreeWili, path: str):
         # else:
         #     print(f"Failed to set contrast: {result.unwrap_err()}")
 
-        result = fw.wileye_set_resolution(2)
-        if result.is_ok():
-            print("Resolution set successfully!")
-        else:
-            print(f"Failed to set resolution: {result.unwrap_err()}")
-
         result = serial.wileye_take_picture(1, path)
 
         if result.is_ok():
@@ -105,7 +99,7 @@ def main():
     
     take_picture(fw, SAVE_IMAGE_PATH)
 
-    time.sleep(10) # very precise timing
+    time.sleep(15) # very precise timing
 
     # ensure destination directory exists
     dest = pathlib.Path(args.dest)

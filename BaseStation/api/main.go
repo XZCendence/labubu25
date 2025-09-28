@@ -13,8 +13,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -32,11 +32,11 @@ type Analysis struct {
 }
 
 type FocusPoint struct {
-	Timestamp string  `json:"timestamp"`
-	Decibels float64	`json:"decibels"`
-	FocusLevel  float64 `json:"focus_level"`
-	IsFocused   bool    `json:"is_focused"`
-	IsAway      bool    `json:"is_away"`
+	Timestamp  string  `json:"timestamp"`
+	Decibels   float64 `json:"decibels"`
+	FocusLevel float64 `json:"focus_level"`
+	IsFocused  bool    `json:"is_focused"`
+	IsAway     bool    `json:"is_away"`
 }
 
 type StudyStats struct {
@@ -53,39 +53,39 @@ type StudyStats struct {
 
 // PersistedState represents the on-disk snapshot of the in-memory state
 type PersistedState struct {
-	SessionActive bool
-	SessionStart  time.Time
-	LastImageFile string
-	LastAnalysis  Analysis
-	SamplesCount  int
-	FocusHistory  []FocusPoint
-    CurrentSessionID string
+	SessionActive    bool
+	SessionStart     time.Time
+	LastImageFile    string
+	LastAnalysis     Analysis
+	SamplesCount     int
+	FocusHistory     []FocusPoint
+	CurrentSessionID string
 }
 
 // Session represents a completed study session
 type Session struct {
-    ID            string          `json:"status"`
-    Start         time.Time       `json:"timestamp"`
-    End           time.Time       `json:"end"`
-    SamplesCount  int             `json:"samples_count"`
-    FocusHistory  []FocusPoint    `json:"focus_history"`
-    LastAnalysis  Analysis        `json:"last_analysis"`
+	ID           string       `json:"status"`
+	Start        time.Time    `json:"timestamp"`
+	End          time.Time    `json:"end"`
+	SamplesCount int          `json:"samples_count"`
+	FocusHistory []FocusPoint `json:"focus_history"`
+	LastAnalysis Analysis     `json:"last_analysis"`
 }
 
 // ----- Global state (simple in-memory for hackathon) -----
 
 var (
-	mu             sync.Mutex
-	sessionActive  bool
-	sessionStart   time.Time
-	lastImageFile  string
-	lastAnalysis   Analysis
-	samplesCount   int
-	focusHistory   []FocusPoint
-	tickerStopChan chan struct{}
-	repoRoot       string
-    currentSessionID string
-    sessions         []Session
+	mu               sync.Mutex
+	sessionActive    bool
+	sessionStart     time.Time
+	lastImageFile    string
+	lastAnalysis     Analysis
+	samplesCount     int
+	focusHistory     []FocusPoint
+	tickerStopChan   chan struct{}
+	repoRoot         string
+	currentSessionID string
+	sessions         []Session
 )
 
 // ----- Path constants (relative to repo root) -----
@@ -111,8 +111,12 @@ func dataDir() string {
 }
 
 func ensureDirs() error {
-	if err := os.MkdirAll(dataDir(), 0o755); err != nil { return err }
-	if err := os.MkdirAll(sessionsDir(), 0o755); err != nil { return err }
+	if err := os.MkdirAll(dataDir(), 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(sessionsDir(), 0o755); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -151,12 +155,16 @@ func saveState() error {
 	st.LastAnalysis = lastAnalysis
 	st.SamplesCount = samplesCount
 	st.FocusHistory = append([]FocusPoint(nil), focusHistory...)
-    st.CurrentSessionID = currentSessionID
+	st.CurrentSessionID = currentSessionID
 	mu.Unlock()
 
-	if err := os.MkdirAll(sessionsDir(), 0o755); err != nil { return err }
+	if err := os.MkdirAll(sessionsDir(), 0o755); err != nil {
+		return err
+	}
 	f, err := os.Create(statePath())
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer f.Close()
 	enc := gob.NewEncoder(f)
 	return enc.Encode(&st)
@@ -165,13 +173,17 @@ func saveState() error {
 func loadState() error {
 	f, err := os.Open(statePath())
 	if err != nil {
-		if os.IsNotExist(err) { return nil }
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 	defer f.Close()
 	var st PersistedState
 	dec := gob.NewDecoder(f)
-	if err := dec.Decode(&st); err != nil { return err }
+	if err := dec.Decode(&st); err != nil {
+		return err
+	}
 	mu.Lock()
 	sessionActive = st.SessionActive
 	sessionStart = st.SessionStart
@@ -179,47 +191,55 @@ func loadState() error {
 	lastAnalysis = st.LastAnalysis
 	samplesCount = st.SamplesCount
 	focusHistory = append([]FocusPoint(nil), st.FocusHistory...)
-    currentSessionID = st.CurrentSessionID
+	currentSessionID = st.CurrentSessionID
 	mu.Unlock()
 	return nil
 }
 
 func saveCompletedSession(s Session) error {
-    if err := os.MkdirAll(sessionsDir(), 0o755); err != nil { return err }
-    fname := filepath.Join(sessionsDir(), fmt.Sprintf("session-%s.gob", s.ID))
-    f, err := os.Create(fname)
-    if err != nil { return err }
-    defer f.Close()
-    enc := gob.NewEncoder(f)
-    return enc.Encode(&s)
+	if err := os.MkdirAll(sessionsDir(), 0o755); err != nil {
+		return err
+	}
+	fname := filepath.Join(sessionsDir(), fmt.Sprintf("session-%s.gob", s.ID))
+	f, err := os.Create(fname)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := gob.NewEncoder(f)
+	return enc.Encode(&s)
 }
 
 func loadAllSessions() error {
-    dir := sessionsDir()
-    entries, err := os.ReadDir(dir)
-    if err != nil {
-        if os.IsNotExist(err) { return nil }
-        return err
-    }
-    var loaded []Session
-    for _, ent := range entries {
-        name := ent.Name()
-        if name == stateFileName || !strings.HasSuffix(name, ".gob") || !strings.HasPrefix(name, "session-") {
-            continue
-        }
-        f, err := os.Open(filepath.Join(dir, name))
-        if err != nil { continue }
-        var s Session
-        dec := gob.NewDecoder(f)
-        if err := dec.Decode(&s); err == nil {
-            loaded = append(loaded, s)
-        }
-        f.Close()
-    }
-    mu.Lock()
-    sessions = loaded
-    mu.Unlock()
-    return nil
+	dir := sessionsDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var loaded []Session
+	for _, ent := range entries {
+		name := ent.Name()
+		if name == stateFileName || !strings.HasSuffix(name, ".gob") || !strings.HasPrefix(name, "session-") {
+			continue
+		}
+		f, err := os.Open(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		var s Session
+		dec := gob.NewDecoder(f)
+		if err := dec.Decode(&s); err == nil {
+			loaded = append(loaded, s)
+		}
+		f.Close()
+	}
+	mu.Lock()
+	sessions = loaded
+	mu.Unlock()
+	return nil
 }
 
 func listSessionStartTimes() []time.Time {
@@ -323,7 +343,6 @@ func runCaptureImageOnce() (string, error) {
 	}
 	return out, nil
 }
-
 
 func runCaptureAudioOnce() (string, error) {
 	if err := ensureDirs(); err != nil {
@@ -462,7 +481,7 @@ func analyzeImage(path string) (Analysis, error) {
 	}
 
 	bodyBytes, _ := json.Marshal(reqBody)
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=" + key
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + key
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	resp, err := httpClient.Post(url, "application/json", strings.NewReader(string(bodyBytes)))
 	if err != nil {
@@ -581,35 +600,35 @@ func stopScheduler() {
 }
 
 func doCaptureCycle(e *echo.Echo) {
-    img, aud, err := runCaptureOnce()
-    if err != nil {
-        e.Logger.Error(err)
-        return
-    }
+	img, aud, err := runCaptureOnce()
+	if err != nil {
+		e.Logger.Error(err)
+		return
+	}
 	db, err := readAudio(aud)
 	if err != nil {
-        e.Logger.Error(err)
-        return
+		e.Logger.Error(err)
+		return
 	}
-    analysis, err := analyzeImage(img)
-    if err != nil {
-        e.Logger.Error(err)
-        return
-    }
-    mu.Lock()
-    lastImageFile = img
-    lastAnalysis = analysis
-    samplesCount++
-    focusHistory = append(focusHistory, FocusPoint{Timestamp: time.Now().Format(time.RFC3339), 
+	analysis, err := analyzeImage(img)
+	if err != nil {
+		e.Logger.Error(err)
+		return
+	}
+	mu.Lock()
+	lastImageFile = img
+	lastAnalysis = analysis
+	samplesCount++
+	focusHistory = append(focusHistory, FocusPoint{Timestamp: time.Now().Format(time.RFC3339),
 		FocusLevel: analysis.FocusLevel, IsFocused: analysis.IsFocused, IsAway: analysis.IsAway, Decibels: db})
-    mu.Unlock()
-    if err := saveState(); err != nil {
-        e.Logger.Warnf("saveState failed: %v", err)
-    }
+	mu.Unlock()
+	if err := saveState(); err != nil {
+		e.Logger.Warnf("saveState failed: %v", err)
+	}
 }
 
 func main() {
-    e := echo.New()
+	e := echo.New()
 
 	// Load .env from repo root if present
 	if root := findRepoRoot(); root != "" {
@@ -621,21 +640,21 @@ func main() {
 		}
 	}
 
-    if err := ensureDirs(); err != nil {
-        e.Logger.Fatal(err)
-    }
+	if err := ensureDirs(); err != nil {
+		e.Logger.Fatal(err)
+	}
 
-    // Load previous state and sessions if available
-    if err := loadState(); err != nil {
-        e.Logger.Warnf("loadState failed: %v", err)
-    }
-    if err := loadAllSessions(); err != nil {
-        e.Logger.Warnf("loadAllSessions failed: %v", err)
-    }
-    // If session was active, resume scheduler
-    if sessionActive {
-        startScheduler(e)
-    }
+	// Load previous state and sessions if available
+	if err := loadState(); err != nil {
+		e.Logger.Warnf("loadState failed: %v", err)
+	}
+	if err := loadAllSessions(); err != nil {
+		e.Logger.Warnf("loadAllSessions failed: %v", err)
+	}
+	// If session was active, resume scheduler
+	if sessionActive {
+		startScheduler(e)
+	}
 
 	RegisterRoutes(e)
 

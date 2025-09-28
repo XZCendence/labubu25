@@ -11,7 +11,7 @@ const buttonVariants = cva(
       variant: {
         default: `transition-all duration-100
           outline-black/40 outline-1 outline-offset-0 border-none
-          bg-gradient-to-b from-lime-600 to-lime-500
+          bg-gradient-to-b from-lime-400 to-lime-500
           !text-white [text-shadow:0_1px_rgba(0,0,0,0.2)]
           shadow-[inset_0_1px_0px_rgba(255,255,255,0.3),inset_0_-1px_0px_rgba(0,0,0,0.4),0_1px_2px_rgba(0,0,0,0.4),0_0_0_1px_black]
           hover:bg-gradient-to-b hover:from-lime-500 hover:to-lime-400
