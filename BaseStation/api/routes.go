@@ -23,7 +23,11 @@ func RegisterRoutes(e *echo.Echo) {
     }))
 
     // Static files and images
-    staticDir := filepath.Join(dataDir(), "..", "..", "static")
+    // Static dir relative to repo root
+    staticDir := filepath.Join(repoRoot, staticDirRel)
+    if repoRoot == "" { // fallback when running from repo root
+        staticDir = staticDirRel
+    }
     staticDir = filepath.Clean(staticDir)
     e.Static("/", staticDir)
     e.Static("/images", dataDir())
@@ -77,4 +81,3 @@ func RegisterRoutes(e *echo.Echo) {
         return c.JSON(http.StatusOK, a)
     })
 }
-

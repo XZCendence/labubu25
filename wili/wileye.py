@@ -73,12 +73,13 @@ def transfer_picture(fw: FreeWili, processor: FwProcessor, source_file: str, des
     try:
         result = fw.get_file(
             source_file=source_file,
-            destination_path=dest_path,
+            destination_path=destination_path,
             processor=processor,
             event_cb=print_progress
         )
 
         if result.is_ok():
+            dest_path = pathlib.Path(destination_path)
             print(f"Image saved to: {dest_path.absolute()}")
             print(f"Image size: {dest_path.stat().st_size} bytes")
         else:

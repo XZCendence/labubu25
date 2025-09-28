@@ -1,23 +1,23 @@
 package main
 
 import (
-    "bufio"
-    "context"
-    "encoding/base64"
-    "encoding/json"
-    "fmt"
-    "io"
-    "net/http"
-    "os"
-    "os/exec"
-    "path/filepath"
-    "regexp"
-    "strings"
-    "sync"
-    "syscall"
-    "time"
+	"bufio"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
 
-    "github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4"
 )
 
 // ----- Types -----
@@ -60,15 +60,24 @@ var (
 	repoRoot       string
 )
 
+// ----- Path constants (relative to repo root) -----
+const (
+	wiliEyeScriptRel   = "wili/wileye.py"
+	wiliAudioScriptRel = "wili/audio.py"
+	// Store captured images under BaseStation/data/images (repo-root relative)
+	dataImagesRel = "BaseStation/data/images"
+	staticDirRel  = "BaseStation/api/static"
+)
+
 // ----- Helpers -----
 
 func dataDir() string {
 	// Place images under <repoRoot>/BaseStation/api/data/images
 	if repoRoot != "" {
-		return filepath.Join(repoRoot, "BaseStation", "api", "data", "images")
+		return filepath.Join(repoRoot, dataImagesRel)
 	}
 	// Fallback: relative (works when CWD is repo root)
-	return filepath.Join("BaseStation", "api", "data", "images")
+	return filepath.Join(dataImagesRel)
 }
 
 func ensureDirs() error {
@@ -78,9 +87,9 @@ func ensureDirs() error {
 func pythonPath() string {
 	// Path to the wileye script from repo root execution
 	if repoRoot != "" {
-		return filepath.Join(repoRoot, "wileye", "wileye.py")
+		return filepath.Join(repoRoot, wiliEyeScriptRel)
 	}
-	return filepath.Join("wileye", "wileye.py")
+	return filepath.Join(wiliEyeScriptRel)
 }
 
 func runCaptureOnce() (string, error) {
@@ -182,7 +191,8 @@ func analyzeImage(path string) (Analysis, error) {
 
 	// Prompt instructing strict JSON schema
 	prompt := strings.Join([]string{
-		"You are an assistant that evaluates study focus from a webcam-like image.",
+		"You are an assistant that evaluates study focus from a webcam-like image. Your POV is from the side of the person's desk/workspace. If they are looking straight ahead or down a little bit, they are likely focused.",
+		"If they have a phone in front of them, they are likely not focused.",
 		"Return ONLY strict JSON matching this schema with sensible values:",
 		"{\"is_focused\": boolean, \"focus_level\": number, \"is_away\": boolean, \"text_summary\": string}",
 		"- is_focused: true if person appears engaged with screen/books.",
@@ -212,7 +222,7 @@ func analyzeImage(path string) (Analysis, error) {
 	}
 
 	bodyBytes, _ := json.Marshal(reqBody)
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + key
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=" + key
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	resp, err := httpClient.Post(url, "application/json", strings.NewReader(string(bodyBytes)))
 	if err != nil {
@@ -335,7 +345,7 @@ func doCaptureCycle(e *echo.Echo) {
 }
 
 func main() {
-    e := echo.New()
+	e := echo.New()
 
 	// Load .env from repo root if present
 	if root := findRepoRoot(); root != "" {
@@ -347,11 +357,11 @@ func main() {
 		}
 	}
 
-    if err := ensureDirs(); err != nil {
-        e.Logger.Fatal(err)
-    }
+	if err := ensureDirs(); err != nil {
+		e.Logger.Fatal(err)
+	}
 
-    RegisterRoutes(e)
+	RegisterRoutes(e)
 
 	e.Logger.Printf("Serving on :8085. Open http://localhost:8085/")
 	e.Logger.Fatal(e.Start(":8085"))
@@ -366,7 +376,7 @@ func findRepoRoot() string {
 		// Heuristics: .git or wileye/wileye.py existing from this dir
 		if fileExists(filepath.Join(dir, ".env")) ||
 			fileExists(filepath.Join(dir, ".git")) ||
-			fileExists(filepath.Join(dir, "wileye", "wileye.py")) {
+			fileExists(filepath.Join(dir, wiliEyeScriptRel)) {
 			return dir
 		}
 		parent := filepath.Dir(dir)
