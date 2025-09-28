@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>wili-study Dashboard</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 20px; }
+      header { display:flex; align-items:center; gap:12px; }
+      button { padding:8px 12px; margin-right:8px; }
+      #grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top:16px; }
+      .card { border:1px solid #ddd; border-radius:8px; padding:12px; }
+      img { max-width:100%; height:auto; border-radius:6px; }
+      .stat { margin: 4px 0; }
+      canvas { width:100%; height:160px; background:#fafafa; border:1px solid #eee; border-radius:6px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1 style="margin:0;">wili-study</h1>
+      <button id="startBtn">Start Session</button>
+      <button id="stopBtn">Stop Session</button>
+      <span id="status"></span>
+    </header>
+
+    <div id="grid">
+      <div class="card">
+        <h3>Last Capture</h3>
+        <img id="lastImage" alt="Last capture" />
+        <div id="analysis"></div>
+      </div>
+      <div class="card">
+        <h3>Focus Over Time</h3>
+        <canvas id="chart" width="400" height="160"></canvas>
+        <div id="session"></div>
+      </div>
+    </div>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const imgEl = document.getElementById('lastImage');
+      const analysisEl = document.getElementById('analysis');
+      const sessionEl = document.getElementById('session');
+      const chart = document.getElementById('chart');
+      const ctx = chart.getContext('2d');
+
+      function drawChart(points){
+        ctx.clearRect(0,0,chart.width,chart.height);
+        // axes
+        ctx.strokeStyle = '#ccc';
+        ctx.beginPath(); ctx.moveTo(30,10); ctx.lineTo(30,150); ctx.lineTo(390,150); ctx.stroke();
+        if (!points || points.length === 0) return;
+        const maxX = points.length - 1;
+        ctx.strokeStyle = '#2b7fff';
+        ctx.beginPath();
+        points.forEach((p, i) => {
+          const x = 30 + (360 * i / Math.max(1,maxX));
+          const y = 150 - (p.level * 120); // 0..1 -> 150..30
+          if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        });
+        ctx.stroke();
+      }
+
+      async function fetchDash(){
+        const r = await fetch('/api/dash/monolithic');
+        const d = await r.json();
+        statusEl.textContent = `Status: ${d.status} | Samples: ${d.samples_count}`;
+        if (d.last_image_url){ imgEl.src = d.last_image_url + '?t=' + Date.now(); }
+        analysisEl.innerHTML = `
+          <div class="stat"><b>Focused:</b> ${d.last_analysis.is_focused} (${(d.last_analysis.focus_level*100).toFixed(0)}%)</div>
+          <div class="stat"><b>Away:</b> ${d.last_analysis.is_away}</div>
+          <div class="stat"><b>Summary:</b> ${d.last_analysis.text_summary}</div>
+        `;
+        sessionEl.innerHTML = `
+          <div class="stat"><b>Active:</b> ${d.session_active}</div>
+          <div class="stat"><b>Started:</b> ${d.session_started || '-'}</div>
+          <div class="stat"><b>Duration(s):</b> ${d.duration_seconds}</div>
+        `;
+        drawChart((d.focus_history||[]).map(p => ({ level: p.level })));
+      }
+
+      document.getElementById('startBtn').onclick = async () => {
+        await fetch('/api/session/start', { method:'POST' });
+        fetchDash();
+      };
+      document.getElementById('stopBtn').onclick = async () => {
+        await fetch('/api/session/stop', { method:'POST' });
+        fetchDash();
+      };
+
+      setInterval(fetchDash, 4000);
+      fetchDash();
+    </script>
+  </body>
+  </html>
+
