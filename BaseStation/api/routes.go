@@ -45,6 +45,7 @@ func RegisterRoutes(e *echo.Echo) {
 		sessionStart = time.Now()
 		samplesCount = 0
 		focusHistory = nil
+		currentSessionID = time.Now().Format("20060102-150405")
 		mu.Unlock()
 		startScheduler(e)
 		if err := saveState(); err != nil {
@@ -55,12 +56,32 @@ func RegisterRoutes(e *echo.Echo) {
 
 	e.POST("/api/session/stop", func(c echo.Context) error {
 		mu.Lock()
+		wasActive := sessionActive
+		id := currentSessionID
+		start := sessionStart
+		sc := samplesCount
+		fh := append([]FocusPoint(nil), focusHistory...)
+		la := lastAnalysis
 		sessionActive = false
+		currentSessionID = ""
 		mu.Unlock()
 		stopScheduler()
-		if err := saveState(); err != nil {
-			klog.Errorf("saveState failed: %v", err)
+		if wasActive {
+			s := Session{
+				ID:           id,
+				Start:        start,
+				End:          time.Now(),
+				SamplesCount: sc,
+				FocusHistory: fh,
+				LastAnalysis: la,
+			}
+			if err := saveCompletedSession(s); err != nil {
+				klog.Errorf("saveCompletedSession failed: %v", err)
+			} else {
+				mu.Lock(); sessions = append(sessions, s); mu.Unlock()
+			}
 		}
+		if err := saveState(); err != nil { klog.Errorf("saveState failed: %v", err) }
 		return c.JSON(http.StatusOK, map[string]any{"ok": true})
 	})
 
