@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -65,8 +66,10 @@ const (
 	wiliEyeScriptRel   = "wili/wileye.py"
 	wiliAudioScriptRel = "wili/audio.py"
 	// Store captured images under BaseStation/data/images (repo-root relative)
-	dataImagesRel = "BaseStation/data/images"
-	staticDirRel  = "BaseStation/api/static"
+	dataImagesRel  = "BaseStation/data/images"
+	staticDirRel   = "BaseStation/api/static"
+	sessionsDirRel = "BaseStation/data/sessions"
+	stateFileName  = "state.gob"
 )
 
 // ----- Helpers -----
@@ -81,7 +84,9 @@ func dataDir() string {
 }
 
 func ensureDirs() error {
-	return os.MkdirAll(dataDir(), 0o755)
+	if err := os.MkdirAll(dataDir(), 0o755); err != nil { return err }
+	if err := os.MkdirAll(sessionsDir(), 0o755); err != nil { return err }
+	return nil
 }
 
 func pythonPath() string {
@@ -90,6 +95,66 @@ func pythonPath() string {
 		return filepath.Join(repoRoot, wiliEyeScriptRel)
 	}
 	return filepath.Join(wiliEyeScriptRel)
+}
+
+// sessionsDir returns the absolute path to the sessions directory
+func sessionsDir() string {
+	if repoRoot != "" {
+		return filepath.Join(repoRoot, sessionsDirRel)
+	}
+	return sessionsDirRel
+}
+
+func statePath() string { return filepath.Join(sessionsDir(), stateFileName) }
+
+// PersistedState represents the on-disk snapshot of the in-memory state
+type PersistedState struct {
+	SessionActive bool
+	SessionStart  time.Time
+	LastImageFile string
+	LastAnalysis  Analysis
+	SamplesCount  int
+	FocusHistory  []FocusPoint
+}
+
+func saveState() error {
+	st := PersistedState{}
+	mu.Lock()
+	st.SessionActive = sessionActive
+	st.SessionStart = sessionStart
+	st.LastImageFile = lastImageFile
+	st.LastAnalysis = lastAnalysis
+	st.SamplesCount = samplesCount
+	st.FocusHistory = append([]FocusPoint(nil), focusHistory...)
+	mu.Unlock()
+
+	if err := os.MkdirAll(sessionsDir(), 0o755); err != nil { return err }
+	f, err := os.Create(statePath())
+	if err != nil { return err }
+	defer f.Close()
+	enc := gob.NewEncoder(f)
+	return enc.Encode(&st)
+}
+
+func loadState() error {
+	f, err := os.Open(statePath())
+	if err != nil {
+		if os.IsNotExist(err) { return nil }
+		return err
+	}
+	defer f.Close()
+	var st PersistedState
+	dec := gob.NewDecoder(f)
+	if err := dec.Decode(&st); err != nil { return err }
+	mu.Lock()
+	sessionActive = st.SessionActive
+	sessionStart = st.SessionStart
+	lastImageFile = st.LastImageFile
+	lastAnalysis = st.LastAnalysis
+	samplesCount = st.SamplesCount
+	focusHistory = append([]FocusPoint(nil), st.FocusHistory...)
+	mu.Unlock()
+	return nil
 }
 
 func runCaptureOnce() (string, error) {
@@ -326,26 +391,29 @@ func stopScheduler() {
 }
 
 func doCaptureCycle(e *echo.Echo) {
-	img, err := runCaptureOnce()
-	if err != nil {
-		e.Logger.Error(err)
-		return
-	}
-	analysis, err := analyzeImage(img)
-	if err != nil {
-		e.Logger.Error(err)
-		return
-	}
-	mu.Lock()
-	lastImageFile = img
-	lastAnalysis = analysis
-	samplesCount++
-	focusHistory = append(focusHistory, FocusPoint{Timestamp: time.Now().Format(time.RFC3339), Level: analysis.FocusLevel})
-	mu.Unlock()
+    img, err := runCaptureOnce()
+    if err != nil {
+        e.Logger.Error(err)
+        return
+    }
+    analysis, err := analyzeImage(img)
+    if err != nil {
+        e.Logger.Error(err)
+        return
+    }
+    mu.Lock()
+    lastImageFile = img
+    lastAnalysis = analysis
+    samplesCount++
+    focusHistory = append(focusHistory, FocusPoint{Timestamp: time.Now().Format(time.RFC3339), Level: analysis.FocusLevel})
+    mu.Unlock()
+    if err := saveState(); err != nil {
+        e.Logger.Warnf("saveState failed: %v", err)
+    }
 }
 
 func main() {
-	e := echo.New()
+    e := echo.New()
 
 	// Load .env from repo root if present
 	if root := findRepoRoot(); root != "" {
@@ -357,9 +425,18 @@ func main() {
 		}
 	}
 
-	if err := ensureDirs(); err != nil {
-		e.Logger.Fatal(err)
-	}
+    if err := ensureDirs(); err != nil {
+        e.Logger.Fatal(err)
+    }
+
+    // Load previous state if available
+    if err := loadState(); err != nil {
+        e.Logger.Warnf("loadState failed: %v", err)
+    }
+    // If session was active, resume scheduler
+    if sessionActive {
+        startScheduler(e)
+    }
 
 	RegisterRoutes(e)
 
