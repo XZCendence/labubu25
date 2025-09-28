@@ -64,12 +64,12 @@ type PersistedState struct {
 
 // Session represents a completed study session
 type Session struct {
-    ID            string
-    Start         time.Time
-    End           time.Time
-    SamplesCount  int
-    FocusHistory  []FocusPoint
-    LastAnalysis  Analysis
+    ID            string          `json:"status"`
+    Start         time.Time       `json:"timestamp"`
+    End           time.Time       `json:"end"`
+    SamplesCount  int             `json:"samples_count"`
+    FocusHistory  []FocusPoint    `json:"focus_history"`
+    LastAnalysis  Analysis        `json:"last_analysis"`
 }
 
 // ----- Global state (simple in-memory for hackathon) -----

@@ -41,11 +41,19 @@ func RegisterRoutes(e *echo.Echo) {
 
 	// Old Session Dashboard data
 	e.GET("/api/dash/session", func(c echo.Context) error {
+		err := loadAllSessions()
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		}
 		datetime := c.QueryParam("datetime")
 		return c.JSON(http.StatusOK, prevSnapshot(datetime))
 	})
 
 	e.GET("/api/sessionlist", func(c echo.Context) error {
+		err := loadAllSessions()
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		}
 		return c.JSON(http.StatusOK, listSessionStartTimes())
 	})
 
