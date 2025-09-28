@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -21,6 +22,17 @@ func RegisterRoutes(e *echo.Echo) {
 		LogRemoteIP:   true,
 		LogValuesFunc: customLogger,
 	}))
+
+	// Static files and images
+	// Static dir relative to repo root
+	staticDir := filepath.Join(repoRoot, staticDirRel)
+	if repoRoot == "" { // fallback when running from repo root
+		staticDir = staticDirRel
+	}
+	staticDir = filepath.Clean(staticDir)
+
+	e.Static("/", staticDir)
+	e.Static("/images", dataDir())
 
 	// Dashboard data
 	e.GET("/api/dash/monolithic", func(c echo.Context) error {
@@ -85,10 +97,14 @@ func RegisterRoutes(e *echo.Echo) {
 
 	// Immediate capture + analysis
 	e.POST("/api/capture/once", func(c echo.Context) error {
-		img, err := runCaptureOnce()
+		img, aud, err := runCaptureOnce()
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		}
+        db, err := readAudio(aud)
+        if err != nil {
+            return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+        }
 		a, err := analyzeImage(img)
 		if err != nil {
 			return c.JSON(http.StatusBadGateway, map[string]any{"error": err.Error()})
@@ -97,7 +113,8 @@ func RegisterRoutes(e *echo.Echo) {
 		lastImageFile = img
 		lastAnalysis = a
 		samplesCount++
-		focusHistory = append(focusHistory, FocusPoint{Timestamp: time.Now().Format(time.RFC3339), Level: a.FocusLevel})
+		focusHistory = append(focusHistory, FocusPoint{Timestamp: time.Now().Format(time.RFC3339), 
+			FocusLevel: a.FocusLevel, IsAway: a.IsAway, IsFocused: a.IsFocused, Decibels: db})
 		mu.Unlock()
 		if err := saveState(); err != nil {
 			klog.Errorf("saveState failed: %v", err)

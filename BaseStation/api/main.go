@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -32,7 +33,10 @@ type Analysis struct {
 
 type FocusPoint struct {
 	Timestamp string  `json:"timestamp"`
-	Level     float64 `json:"level"`
+	Decibels float64	`json:"decibels"`
+	FocusLevel  float64 `json:"focus_level"`
+	IsFocused   bool    `json:"is_focused"`
+	IsAway      bool    `json:"is_away"`
 }
 
 type StudyStats struct {
@@ -91,12 +95,20 @@ func ensureDirs() error {
 	return nil
 }
 
-func pythonPath() string {
+func wiliEyePath() string {
 	// Path to the wileye script from repo root execution
 	if repoRoot != "" {
 		return filepath.Join(repoRoot, wiliEyeScriptRel)
 	}
 	return filepath.Join(wiliEyeScriptRel)
+}
+
+func wiliAudioPath() string {
+	// Path to the wileye script from repo root execution
+	if repoRoot != "" {
+		return filepath.Join(repoRoot, wiliAudioScriptRel)
+	}
+	return filepath.Join(wiliAudioScriptRel)
 }
 
 // sessionsDir returns the absolute path to the sessions directory
@@ -210,7 +222,20 @@ func loadAllSessions() error {
     return nil
 }
 
-func runCaptureOnce() (string, error) {
+func runCaptureOnce() (string, string, error) {
+	i, e := runCaptureImageOnce()
+	if e != nil {
+		return "", "", e
+	}
+	a, e2 := runCaptureAudioOnce()
+	if e2 != nil {
+		return i, filepath.Join(dataDir(), "audio.txt"), nil
+		// return "", "", e2
+	}
+	return i, a, nil
+}
+
+func runCaptureImageOnce() (string, error) {
 	if err := ensureDirs(); err != nil {
 		return "", err
 	}
@@ -218,11 +243,11 @@ func runCaptureOnce() (string, error) {
 	ts := time.Now().Format("20060102-150405")
 	out := filepath.Join(dataDir(), fmt.Sprintf("capture-%s.jpg", ts))
 
-	// Start python: python3 wileye/wileye.py --dest <out> with 30s watchdog
+	// Start python: python3 wili/wileye.py --dest <out> with 30s watchdog
 	// We stream logs and watch for a completion line ("Image saved to:") then terminate python.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", pythonPath(), "--dest", out)
+	cmd := exec.CommandContext(ctx, "python3", wiliEyePath(), "--dest", out)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
@@ -289,6 +314,95 @@ func runCaptureOnce() (string, error) {
 		_ = os.WriteFile(latest, b, 0o644)
 	}
 	return out, nil
+}
+
+
+func runCaptureAudioOnce() (string, error) {
+	if err := ensureDirs(); err != nil {
+		return "", err
+	}
+	// Start python: python3 wili/audio.py --dest <out> with 30s watchdog
+	// We stream logs and watch for a completion line ("Image saved to:") then terminate python.
+	out := filepath.Join(dataDir(), "audio.txt")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "python3", wiliAudioPath(), "--dest", out)
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start python: %w", err)
+	}
+
+	done := make(chan error, 1)
+	success := make(chan struct{}, 1)
+	go func() { done <- cmd.Wait() }()
+
+	successRe := regexp.MustCompile(`^Audio saved to:`)
+	errorDoneRe := regexp.MustCompile(`Error: Failed to read response frame in 6\.0 seconds`)
+	// helper to read a pipe and mirror lines to stdout
+	readPipe := func(r io.Reader) {
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			line := sc.Text()
+			fmt.Println(line)
+			if successRe.MatchString(line) || errorDoneRe.MatchString(line) {
+				select {
+				case success <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}
+	go readPipe(stdout)
+	go readPipe(stderr)
+
+	var gotSuccess bool
+	select {
+	case <-success:
+		gotSuccess = true
+		// Ask python to exit; fall back to Kill if needed
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-time.After(2 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		case <-done:
+		case <-ctx.Done():
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	case err := <-done:
+		if err != nil {
+			return "", fmt.Errorf("python exited: %v", err)
+		}
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		return "", fmt.Errorf("python audio capture timed out after 30s")
+	}
+	if !gotSuccess {
+		return "", fmt.Errorf("audio capture did not report completion")
+	}
+	if fi, err := os.Stat(out); err != nil || fi.Size() == 0 {
+		return "", fmt.Errorf("audio capture file missing or empty")
+	}
+
+	return out, nil
+}
+
+// readAudio reads a single float64 value from the given file path.
+func readAudio(path string) (float64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+
+	str := strings.TrimSpace(string(data))
+	val, err := strconv.ParseFloat(str, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse float: %w", err)
+	}
+
+	return val, nil
 }
 
 func analyzeImage(path string) (Analysis, error) {
@@ -444,11 +558,16 @@ func stopScheduler() {
 }
 
 func doCaptureCycle(e *echo.Echo) {
-    img, err := runCaptureOnce()
+    img, aud, err := runCaptureOnce()
     if err != nil {
         e.Logger.Error(err)
         return
     }
+	db, err := readAudio(aud)
+	if err != nil {
+        e.Logger.Error(err)
+        return
+	}
     analysis, err := analyzeImage(img)
     if err != nil {
         e.Logger.Error(err)
@@ -458,7 +577,8 @@ func doCaptureCycle(e *echo.Echo) {
     lastImageFile = img
     lastAnalysis = analysis
     samplesCount++
-    focusHistory = append(focusHistory, FocusPoint{Timestamp: time.Now().Format(time.RFC3339), Level: analysis.FocusLevel})
+    focusHistory = append(focusHistory, FocusPoint{Timestamp: time.Now().Format(time.RFC3339), 
+		FocusLevel: analysis.FocusLevel, IsFocused: analysis.IsFocused, IsAway: analysis.IsAway, Decibels: db})
     mu.Unlock()
     if err := saveState(); err != nil {
         e.Logger.Warnf("saveState failed: %v", err)
@@ -509,7 +629,8 @@ func findRepoRoot() string {
 		// Heuristics: .git or wileye/wileye.py existing from this dir
 		if fileExists(filepath.Join(dir, ".env")) ||
 			fileExists(filepath.Join(dir, ".git")) ||
-			fileExists(filepath.Join(dir, wiliEyeScriptRel)) {
+			fileExists(filepath.Join(dir, wiliEyeScriptRel)) ||
+			fileExists(filepath.Join(dir, wiliAudioScriptRel)) {
 			return dir
 		}
 		parent := filepath.Dir(dir)

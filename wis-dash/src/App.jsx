@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import * as Ariakit from "@ariakit/react";
 import {
@@ -22,17 +23,6 @@ const lineData = [
   { name: "Apr", value: 80 },
   { name: "May", value: 50 },
 ];
-
-const pieData = [
-  { name: "Studying", value: 500 },
-  { name: "TikTok", value: 200 },
-  { name: "Idle", value: 100 },
-];
-
-const data = [
-  { name: 'Focused', value: 67 },
-  { name: 'Not Focused', value: 33 }
-]
 
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28"];
 const PERCENTAGE_COLORS = ["#0088FE", "#919eb3"];
@@ -94,21 +84,79 @@ const renderActiveShape = ({
 };
 
 export default function App() {
+  const [dashboardData, setDashboardData] = useState(null);
+  const [focusHistory, setFocusHistory] = useState([]);
+  
+  useEffect(() => {
+    const fetchData = () => {
+      fetch("/api/dash/monolithic")
+        .then(res => res.json())
+        .then(data => {
+          setDashboardData(data);
+          setFocusHistory(data.focus_history || []);
+        });
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const startSession = () => fetch("/api/session/start", { method: "POST" });
+  const stopSession = () => fetch("/api/session/stop", { method: "POST" });
+
+  const focusHistoryData = dashboardData?.focus_history ?? [];
+
+  const totalSamples = focusHistoryData.length;
+  const focusedSamples = focusHistoryData.filter(entry => entry.is_focused && !entry.is_away).length;
+  const awaySamples = focusHistoryData.filter(entry => entry.is_away).length;
+
+  // For the "Time Spent" Pie Chart
+  const pieData = totalSamples > 0
+    ? [
+        { name: "Focused", value: focusedSamples },
+        { name: "Unfocused", value: totalSamples - focusedSamples - awaySamples },
+        { name: "Away", value: awaySamples },
+      ]
+    : [{ name: "No Data", value: 1 }];
+
+  // For the "Percentage Focused" Radial Chart
+  const averageFocusLevel =
+    totalSamples > 0
+      ? focusHistoryData.reduce((sum, entry) => sum + entry.focus_level, 0) / totalSamples
+      : 0;
+
+  const focusedPercent = Math.round(averageFocusLevel * 100);
+  const unfocusedPercent = 100 - focusedPercent;
+
+  const data = [
+    { name: "Focused", value: focusedPercent },
+    { name: "Unfocused", value: unfocusedPercent },
+  ];
+
+  const lineData = focusHistoryData.map(entry => ({
+    timestamp: entry.timestamp,
+    value: entry.decibels ?? 0,
+  }));
+
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
-      <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
+      <h1 className="text-2xl font-bold mb-2">Will I Study Dashboard</h1>
 
-      <Ariakit.MenuProvider>
-        <Ariakit.MenuButton as={Button}>Options</Ariakit.MenuButton>
-        <Ariakit.Menu className="rounded-xl bg-gray-700 shadow-lg border p-2">
-          <Ariakit.MenuItem className="px-3 py-2 hover:bg-gray-300 rounded">
-            Refresh Data
-          </Ariakit.MenuItem>
-          <Ariakit.MenuItem className="px-3 py-2 hover:bg-gray-300 rounded">
-            Export
-          </Ariakit.MenuItem>
-        </Ariakit.Menu>
-      </Ariakit.MenuProvider>
+      {/* Focus Summary as plain gray text */}
+      <div className="text-gray-400 text-sm mb-6">
+        <p>{dashboardData?.text_summary}</p>
+        <p className="mt-1 text-xs">Last Updated: {dashboardData?.timestamp}</p>
+      </div>
+
+      {/* Expanded Options as visible buttons */}
+      <div className="flex gap-3 mb-6">
+        <Button onClick={() => refreshData()}>Refresh Data</Button>
+        <Button onClick={() => exportData()}>Export</Button>
+        <Button onClick={() => startSession()}>Start Session</Button>
+        <Button onClick={() => stopSession()}>Stop Session</Button>
+      </div>
 
       {/* Flex container */}
       <div className="flex flex-wrap gap-6 mt-6 bg-gray-800 p-4 rounded-lg text-gray-400">
@@ -117,14 +165,27 @@ export default function App() {
           <h2 className="text-lg font-semibold mb-4">Decibel Level</h2>
           <CardContent>
             <LineChart width={400} height={250} data={lineData}>
-              <XAxis dataKey="name" stroke="#fff" />
-              <YAxis stroke="#fff" />
-              <Tooltip />
+              <XAxis
+                dataKey="timestamp"
+                stroke="#fff"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) =>
+                  new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                }
+              />
+              <YAxis stroke="#fff" domain={['auto', 'auto']} />
+              <Tooltip
+                labelFormatter={(label) =>
+                  new Date(label).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                }
+              />
               <Line
                 type="monotone"
                 dataKey="value"
                 stroke="#4f46e5"
                 strokeWidth={2}
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
               />
             </LineChart>
           </CardContent>
@@ -132,7 +193,7 @@ export default function App() {
 
         {/* Pie Chart Card */}
         <Card className="p-4 flex-1 max-h-[440px] max-w-[360px] bg-gray-700">
-          <h2 className="text-lg font-semibold mb-4">Time Spent</h2>
+          <h2 className="text-lg font-semibold mb-4">Time Spent (Minutes)</h2>
           <CardContent className="flex justify-center items-center h-[300px]">
             <PieChart width={300} height={300}>
               <Pie
@@ -175,6 +236,55 @@ export default function App() {
                 ))}
               </Pie>
             </PieChart>
+          </CardContent>
+        </Card>
+
+        <Card className="p-4 flex-1 min-w-[280px] bg-gray-700">
+          <h2 className="text-lg font-semibold mb-4">Focus History</h2>
+          <CardContent>
+            <LineChart width={400} height={250} data={focusHistory}>
+              {/* Format timestamp to HH:mm:ss */}
+              <XAxis
+                dataKey="timestamp"
+                stroke="#fff"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) =>
+                  new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                }
+              />
+              {/* Fix Y-axis range from 0 to 1 */}
+              <YAxis
+                domain={[0, 1]}
+                stroke="#fff"
+                tick={{ fontSize: 12 }}
+              />
+              <Tooltip
+                labelFormatter={(label) =>
+                  new Date(label).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                }
+              />
+              <Line
+                type="monotone"
+                dataKey="focus_level"
+                stroke="#22d3ee"
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
+              />
+            </LineChart>
+          </CardContent>
+        </Card>
+
+        <Card className="p-4 flex-1 max-h-[440px] max-w-[360px] bg-gray-700">
+          <h2 className="text-lg font-semibold mb-4">Latest Image</h2>
+          <CardContent className="flex justify-center items-center h-[300px]">
+            {dashboardData?.last_image_url && (
+              <img
+                src={`${dashboardData.last_image_url}?t=${dashboardData.timestamp}`}
+                alt="Latest"
+                className="rounded max-h-[260px]"
+              />
+            )}
           </CardContent>
         </Card>
       </div>
