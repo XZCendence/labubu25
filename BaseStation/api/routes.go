@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"path/filepath"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -22,16 +21,6 @@ func RegisterRoutes(e *echo.Echo) {
 		LogRemoteIP:   true,
 		LogValuesFunc: customLogger,
 	}))
-
-	// Static files and images
-	// Static dir relative to repo root
-	staticDir := filepath.Join(repoRoot, staticDirRel)
-	if repoRoot == "" { // fallback when running from repo root
-		staticDir = staticDirRel
-	}
-	staticDir = filepath.Clean(staticDir)
-	e.Static("/", staticDir)
-	e.Static("/images", dataDir())
 
 	// Dashboard data
 	e.GET("/api/dash/monolithic", func(c echo.Context) error {
@@ -78,10 +67,14 @@ func RegisterRoutes(e *echo.Echo) {
 			if err := saveCompletedSession(s); err != nil {
 				klog.Errorf("saveCompletedSession failed: %v", err)
 			} else {
-				mu.Lock(); sessions = append(sessions, s); mu.Unlock()
+				mu.Lock()
+				sessions = append(sessions, s)
+				mu.Unlock()
 			}
 		}
-		if err := saveState(); err != nil { klog.Errorf("saveState failed: %v", err) }
+		if err := saveState(); err != nil {
+			klog.Errorf("saveState failed: %v", err)
+		}
 		return c.JSON(http.StatusOK, map[string]any{"ok": true})
 	})
 
