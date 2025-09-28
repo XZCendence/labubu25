@@ -5,6 +5,7 @@ SRC_IMAGE_PATH = "/fpga/aaa.jpg"
 import sys
 import pathlib
 import time
+import argparse
 import result
 
 # Ensure we use the local freewili module
@@ -90,6 +91,10 @@ def transfer_picture(fw: FreeWili, processor: FwProcessor, source_file: str, des
         print(f"Download failed: {e}")
 
 def main():
+    parser = argparse.ArgumentParser(description="Capture and download an image from FreeWili Wileye camera")
+    parser.add_argument("--dest", dest="dest", default=DEST_IMAGE_PATH, help="Destination path on host for the downloaded image")
+    args = parser.parse_args()
+
     try:
         fw = FreeWili.find_first().expect("No FreeWili devices found")
         print(f"Found FreeWili device: {fw}")
@@ -103,9 +108,12 @@ def main():
     
     take_picture(fw, SAVE_IMAGE_PATH)
 
-    time.sleep(7) # very precise timing
+    time.sleep(10) # very precise timing
 
-    transfer_picture(fw, FwProcessor.Main, SRC_IMAGE_PATH, DEST_IMAGE_PATH)
+    # ensure directory
+    dest = pathlib.Path(args.dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    transfer_picture(fw, FwProcessor.Main, SRC_IMAGE_PATH, str(dest))
 
 if __name__ == '__main__':
     main()
